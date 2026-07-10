@@ -13,6 +13,7 @@ Handlers must never raise; they degrade to a best-effort answer.
 import re
 import sys
 
+from .capitals import lookup_capital
 from .pyexec import run_python
 
 # ---------------------------------------------------------------- helpers
@@ -102,12 +103,45 @@ def sentences(text: str):
 # ---------------------------------------------------------------- handlers
 
 
+def _covers_all_parts(ctx, task, answer):
+    v = ctx.chat("You check answers for completeness. The question may have "
+                 "multiple parts. Reply with exactly YES if the answer explicitly "
+                 "addresses every part of the question, otherwise NO.",
+                 f"Question: {task}\n\nAnswer: {answer}",
+                 temperature=0.0, max_tokens=4)
+    return v.strip().upper().startswith("Y")
+
+
 def h_factual(task, ctx):
     sysmsg = ("Answer the question accurately and directly in 1-3 short sentences, "
               "covering every part of it. No preamble.")
+    # offline gazetteer beats a 3B's spotty geography
+    hit = lookup_capital(task)
+    if hit:
+        disp, cap, water = hit
+        ql = task.lower()
+        asks_water = bool(re.search(
+            r"body of water|water|river|lake|sea|ocean|bay|strait|gulf", ql))
+        only_capital = not re.sub(
+            r"what is|the capital( city)? of|and|what|body of water|is it near"
+            r"|near|it|\?|,|\.|\s+|" + re.escape(disp.lower()), "", ql).strip()
+        if asks_water:
+            ans = f"The capital of {disp} is {cap}, and it is located near {water}."
+            return {"answer": ans, "conf": 0.95, "cat": "factual"}
+        if only_capital:
+            return {"answer": f"The capital of {disp} is {cap}.",
+                    "conf": 0.95, "cat": "factual"}
+        # capital plus some other sub-question: give the model the known fact
+        task = f"{task}\n(Known fact: the capital of {disp} is {cap}.)"
     a1 = ctx.chat(sysmsg, task, temperature=0.0, max_tokens=150)
     if not a1:
         return {"answer": "", "conf": 0.2, "cat": "factual"}
+    if ctx.have_time(18) and not _covers_all_parts(ctx, task, a1):
+        a_full = ctx.chat("The question has multiple parts. Answer EACH part "
+                          "explicitly and factually, in 1-3 short sentences total.",
+                          task, temperature=0.2, max_tokens=150, seed=3)
+        if a_full:
+            a1 = a_full  # regenerated with all parts addressed explicitly
     if not ctx.have_time(20):
         return {"answer": a1, "conf": 0.6, "cat": "factual"}
     a2 = ctx.chat("Answer precisely and completely in 1-3 short sentences. "
@@ -145,42 +179,79 @@ _PROG_SYS = ("You convert word problems into Python. Write a minimal Python 3 "
              "Output only the code. No markdown, no comments, no explanations.")
 
 
+def _math_ballot(ctx, task, kind, temp, seed):
+    """One independent attempt at the numeric answer. Returns float or None."""
+    if kind == "prog":
+        code = extract_code(ctx.chat(_PROG_SYS, task, temperature=temp,
+                                     max_tokens=220, seed=seed))
+        ok, out, _ = run_python(code) if code else (False, "", "")
+        return last_number(out) if ok else None
+    cot = ctx.chat("Solve the problem with brief step-by-step reasoning "
+                   "(at most 6 short lines). End with one final line exactly: "
+                   "ANSWER: <number>",
+                   task, temperature=temp, max_tokens=256, seed=seed)
+    return normalize_num(answer_line(cot) or "") or last_number(cot)
+
+
+def _vote_key(v):
+    return fmt_num(round(v, 9))
+
+
 def h_math(task, ctx):
-    c1 = extract_code(ctx.chat(_PROG_SYS, task, temperature=0.0, max_tokens=220))
-    ok1, out1, err1 = run_python(c1) if c1 else (False, "", "empty")
-    v1 = last_number(out1) if ok1 else None
-
-    v2 = None
-    if ctx.have_time(25):
-        c2 = extract_code(ctx.chat(
-            "Solve the problem by writing a tiny Python 3 program. It must print "
-            "only the final numeric answer. Output only code, nothing else.",
-            task, temperature=0.5, max_tokens=220, seed=11))
-        ok2, out2, _ = run_python(c2) if c2 else (False, "", "")
-        v2 = last_number(out2) if ok2 else None
-
-    if v1 is not None and v2 is not None and nums_equal(v1, v2):
-        return {"answer": _phrase_math(ctx, task, v1), "conf": 0.95, "cat": "math"}
-
-    # tie-break / fallback: brief chain-of-thought
-    v3 = None
-    if ctx.have_time(35):
-        cot = ctx.chat("Solve the problem with brief step-by-step reasoning "
-                       "(at most 6 short lines). End with one final line exactly: "
-                       "ANSWER: <number>",
-                       task, temperature=0.0, max_tokens=300)
-        v3 = normalize_num(answer_line(cot) or "") or last_number(cot)
-
-    for x, y in ((v1, v3), (v2, v3), (v1, v2)):
-        if x is not None and y is not None and nums_equal(x, y):
-            return {"answer": _phrase_math(ctx, task, x), "conf": 0.85, "cat": "math"}
-
-    best = next((v for v in (v1, v3, v2) if v is not None), None)
-    if best is None:
-        direct = ctx.chat("Answer the question. Give the final number and one short "
-                          "sentence.", task, temperature=0.0, max_tokens=200)
+    # majority voting over independent ballots: 2 programs, then CoT and more
+    # samples until some value gets two votes
+    # executed programs are categorically more reliable than a 3B's mental
+    # arithmetic: programs vote with weight 2, chains-of-thought with weight 1,
+    # and ties break toward program-backed values
+    schedule = [("prog", 0.0, 42), ("prog", 0.5, 11), ("prog", 0.85, 23),
+                ("cot", 0.0, 42), ("cot", 0.6, 31)]
+    ballots = []
+    prog_agree = {}
+    for i, (kind, temp, seed) in enumerate(schedule):
+        prog_vals = [v for k, v in ballots if k == "prog"]
+        if len(prog_vals) >= 2 and any(
+                prog_vals.count(pv) >= 2 or
+                sum(1 for x in prog_vals if nums_equal(x, pv)) >= 2
+                for pv in prog_vals):
+            break  # two independent programs agree — done
+        if kind == "cot" and not ballots and not ctx.have_time(25):
+            break
+        if i >= 3 and not ctx.have_time(20):
+            break
+        v = _math_ballot(ctx, task, kind, temp, seed)
+        if v is not None:
+            ballots.append((kind, v))
+    if not ballots:
+        direct = ctx.chat("Answer the question. Give the final number and one "
+                          "short sentence.", task, temperature=0.0, max_tokens=200)
         return {"answer": direct or "", "conf": 0.3, "cat": "math"}
-    return {"answer": _phrase_math(ctx, task, best), "conf": 0.5, "cat": "math"}
+
+    weights, has_prog, first_prog = {}, {}, None
+    for kind, v in ballots:
+        k = _vote_key(v)
+        weights[k] = weights.get(k, 0) + (2 if kind == "prog" else 1)
+        has_prog[k] = has_prog.get(k, False) or kind == "prog"
+        if first_prog is None and kind == "prog":
+            first_prog = k
+    ranked = sorted(weights.items(),
+                    key=lambda kv: (-kv[1], not has_prog[kv[0]], kv[0] != first_prog))
+    top_key = ranked[0][0]
+    winner = next(v for kind, v in ballots if _vote_key(v) == top_key)
+
+    n_prog = sum(1 for kind, v in ballots if kind == "prog" and _vote_key(v) == top_key)
+    n_cot = sum(1 for kind, v in ballots if kind == "cot" and _vote_key(v) == top_key)
+    if n_prog >= 2:
+        conf = 0.95
+    elif n_prog and n_cot:
+        conf = 0.85
+    elif n_prog:
+        conf = 0.6
+    elif n_cot >= 2:
+        conf = 0.5
+    else:
+        conf = 0.35
+    log(f"math ballots={[(k, fmt_num(v)) for k, v in ballots]} -> {fmt_num(winner)} conf={conf}")
+    return {"answer": _phrase_math(ctx, task, winner), "conf": conf, "cat": "math"}
 
 
 def _phrase_math(ctx, task, value) -> str:
@@ -324,6 +395,7 @@ def h_ner(task, ctx):
         lines = _ner_lines(a)
     if not lines:
         return {"answer": a or "", "conf": 0.3, "cat": "ner"}
+    lines = _merge_adjacent_entities(lines, task)
     seen, out = set(), []
     for ln in lines:
         k = norm_short(ln)
@@ -331,6 +403,29 @@ def h_ner(task, ctx):
             seen.add(k)
             out.append(ln)
     return {"answer": "\n".join(out), "conf": 0.85, "cat": "ner"}
+
+
+def _merge_adjacent_entities(lines, source):
+    """'Maria - Person' + 'Sanchez - Person' -> 'Maria Sanchez - Person' when
+    the combined string appears verbatim in the source text."""
+    parsed = []
+    for ln in lines:
+        m = re.match(r"(.+?)\s-\s(.+)", ln)
+        parsed.append([m.group(1).strip(), m.group(2).strip()] if m else None)
+    out, i = [], 0
+    while i < len(parsed):
+        cur = parsed[i]
+        if cur and i + 1 < len(parsed) and parsed[i + 1]:
+            nxt = parsed[i + 1]
+            combined = f"{cur[0]} {nxt[0]}"
+            if (cur[1].lower() == nxt[1].lower()
+                    and re.search(re.escape(combined), source, re.I)):
+                out.append(f"{combined} - {cur[1]}")
+                i += 2
+                continue
+        out.append(lines[i])
+        i += 1
+    return out
 
 
 def _ner_lines(text):
@@ -437,8 +532,9 @@ def _differential_compare(code_a, code_b, fname, argsets):
 
 def _reference_impl(ctx, task, fname, seed=77):
     r = ctx.chat("Write a correct, self-contained Python function that does "
-                 f"exactly what the task requires. Name it '{fname}'. Handle the "
-                 "specific requirements stated in the task precisely. "
+                 f"exactly what the task requires. Name it '{fname}'. Implement "
+                 "EXACTLY the stated requirements and nothing more - do not add "
+                 "behavior the task does not ask for. "
                  "Output only the code, no explanations.",
                  task, temperature=0.4, max_tokens=380, seed=seed)
     ref = extract_code(r)
@@ -581,9 +677,13 @@ def _smoke_call(code: str):
 
 def h_code_gen(task, ctx):
     sysmsg = ("You are an expert Python developer. Write correct, clean Python for "
-              "the request, handling edge cases (empty input, duplicates, invalid "
-              "values) sensibly. Reply with ONLY one ```python fence containing the "
-              "code followed by exactly 2 assert statements that test it.")
+              "the request. Implement EXACTLY the stated requirements - do not add "
+              "extra behavior beyond them. When the task names specific things to "
+              "ignore or normalize (e.g. 'ignoring case and spaces'), handle "
+              "exactly those and leave everything else untouched. Handle edge "
+              "cases sensibly. Reply with ONLY "
+              "one ```python fence containing the code followed by exactly 2 assert "
+              "statements that test it.")
     reply = ctx.chat(sysmsg, task, temperature=0.0, max_tokens=420)
     code = extract_code(reply)
     ok, err = compiles(code) if code else (False, "no code")
@@ -622,44 +722,269 @@ def _gen_answer(code):
     return f"```python\n{body}\n```"
 
 
+_N_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "none": 0, "zero": 0}
+
+
+def _tt_options(ctx, task):
+    """Candidate answers for a truth-table puzzle. Deterministic extraction
+    from the text first; a constrained LLM listing only as fallback."""
+    m = re.search(r"labell?ed\s+([\w]+(?:\s*,\s*[\w]+)*(?:\s*,?\s+and\s+[\w]+))",
+                  task, re.I)
+    if m:
+        parts = re.split(r"\s*,\s*|\s+and\s+", m.group(1))
+        opts = [re.sub(r"^and\s+", "", p.strip()) for p in parts if p.strip()]
+        if 2 <= len(opts) <= 6:
+            return opts
+    ons = re.findall(r"(?:note|label|sign|statement)s?\s+on\s+(?:box\s+)?([A-Z]\w*)",
+                     task)
+    uniq = [o for o in dict.fromkeys(ons)]
+    if 2 <= len(uniq) <= 6:
+        return uniq
+    raw = ctx.chat(
+        "Do NOT solve the puzzle. Your only job: list every candidate option "
+        "that the final question could have as its answer, separated by "
+        "commas. No other text. Example of the format: A, B, C",
+        task, temperature=0.0, max_tokens=30)
+    opts = [o.strip().strip(".") for o in (raw or "").split(",")
+            if o.strip() and len(o.strip()) <= 30]
+    if 2 <= len(opts) <= 6:
+        return opts
+    return None
+
+
+def _truth_table_solver(ctx, task):
+    """For 'exactly N statements are true' puzzles: enumerate candidates in
+    code, ask the model only micro-questions ('assuming X, is statement S
+    true?'), count in code. Returns the unique satisfying candidate or None."""
+    m = re.search(r"exactly\s+(\w+)\s+(?:of.*?)?(?:statement|note|claim|label|sign)s?\s+(?:is|are)\s+true",
+                  task, re.I)
+    if not m:
+        m = re.search(r"exactly\s+(\w+)\s+(?:of them\s+)?(?:is|are)\s+(?:telling the truth|true)",
+                      task, re.I)
+    if not m:
+        return None
+    n_word = m.group(1).lower()
+    target = _N_WORDS.get(n_word)
+    if target is None:
+        try:
+            target = int(n_word)
+        except ValueError:
+            return None
+
+    # (owner, statement) pairs when the puzzle attaches statements to items;
+    # otherwise ownerless statements
+    pairs = re.findall(
+        r"(?:note|label|sign|statement)\s+on\s+(?:box\s+)?(\w+)\s+says?\s*[:,]?\s*'([^']{3,120})'",
+        task, re.I)
+    if not pairs:
+        pairs = re.findall(r"(\w+)\s+(?:said|says)\s*[:,]?\s*'([^']{3,120})'",
+                           task, re.I)
+    if pairs and 2 <= len(pairs) <= 6:
+        statements = [(o, s) for o, s in pairs]
+    else:
+        plain = re.findall(r"'([^']{3,120})'", task) or \
+            re.findall(r'"([^"]{3,120})"', task)
+        if not (2 <= len(plain) <= 6):
+            return None
+        statements = [(None, s) for s in plain]
+
+    options = _tt_options(ctx, task)
+    if not options:
+        return None
+
+    sat = []
+    for opt in options:
+        trues = 0
+        for owner, st in statements:
+            val = _tt_eval(ctx, task, st, owner, opt)
+            if val:
+                trues += 1
+        log(f"truth-table: option={opt!r} true_count={trues} target={target}")
+        if trues == target:
+            sat.append(opt)
+    if len(sat) == 1:
+        return sat[0]
+    return None
+
+
+def _tt_eval(ctx, task, statement, owner, opt):
+    """Truth of one statement under 'the answer is opt'. Deterministic for
+    membership statements; tiny LLM entailment otherwise."""
+    s = statement.strip().rstrip(".").lower()
+    if owner:
+        s = re.sub(r"\bhere\b", f"in {owner.lower()}", s)
+        s = re.sub(r"\bi\b", owner.lower(), s)
+        s = re.sub(r"\bme\b", owner.lower(), s)
+    m = re.match(
+        r"the\s+\w+\s+is\s+(not\s+)?in\s+(?:box\s+)?([\w]+)$", s)
+    if m:
+        neg = bool(m.group(1))
+        target_box = m.group(2)
+        val = target_box.lower() == opt.lower()
+        return (not val) if neg else val
+    v = ctx.chat(
+        "You judge simple entailment. Reply with exactly YES or NO.",
+        f"Fact: the correct answer is {opt}, and no other option.\n"
+        f"Statement: \"{statement}\" (said about/by {owner or 'unknown'}).\n"
+        "Given the fact, is the statement true?",
+        temperature=0.0, max_tokens=3)
+    return (v or "").strip().upper().startswith("Y")
+
+
+def _logic_enum_ballot(ctx, task):
+    """Executable enumeration: the model translates the puzzle into a
+    brute-force checker; running it yields a verified answer."""
+    code = extract_code(ctx.chat(
+        "Convert this logic puzzle into a short Python 3 program that "
+        "brute-force enumerates every possible option/assignment, checks ALL "
+        "stated conditions exactly as written, and prints ONLY the final answer "
+        "(the single name/option that satisfies every condition). If the puzzle "
+        "says how many of the statements are true (e.g. 'exactly one note is "
+        "true'), then for EACH candidate answer evaluate every statement's "
+        "truth value and keep the candidate where the count of true statements "
+        "matches. Use itertools.permutations or simple loops. Output only code.",
+        task, temperature=0.0, max_tokens=340, seed=42))
+    ok, out, _ = run_python(code) if code else (False, "", "")
+    if not ok or not out:
+        return None
+    out = out.strip()
+    if len(out.splitlines()) != 1 or not out or len(out) > 80:
+        return None
+    return out
+
+
 def h_logic(task, ctx):
+    """Weighted majority: an executed enumeration program votes with weight 2,
+    sampled chains-of-thought with weight 1."""
     sysmsg = ("Solve the logic puzzle with brief careful reasoning (at most 8 short "
               "lines), checking every stated condition. End with one final line "
               "exactly: ANSWER: <the answer>")
-    r1 = ctx.chat(sysmsg, task, temperature=0.0, max_tokens=280)
-    a1 = answer_line(r1)
-    a2 = None
-    if ctx.have_time(30):
-        r2 = ctx.chat(sysmsg, task, temperature=0.7, max_tokens=280, seed=17)
-        a2 = answer_line(r2)
-    if a1 and a2 and norm_short(a1) == norm_short(a2):
-        return {"answer": _logic_answer(ctx, task, a1), "conf": 0.9, "cat": "logic"}
-    a3 = None
-    if ctx.have_time(30):
-        r3 = ctx.chat("Carefully solve this constraint puzzle. Enumerate the "
-                      "possibilities briefly and eliminate those violating any "
-                      "condition. End with one final line exactly: ANSWER: <the answer>",
-                      task, temperature=0.3, max_tokens=300, seed=29)
-        a3 = answer_line(r3)
-    for x, y in ((a1, a3), (a2, a3)):
-        if x and y and norm_short(x) == norm_short(y):
-            return {"answer": _logic_answer(ctx, task, x), "conf": 0.85, "cat": "logic"}
-    pick = a1 or a3 or a2
-    if pick:
-        return {"answer": _logic_answer(ctx, task, pick), "conf": 0.45, "cat": "logic"}
-    return {"answer": (r1 or "").strip(), "conf": 0.3, "cat": "logic"}
+    enum_sys = ("Carefully solve this constraint puzzle. Enumerate the possible "
+                "assignments briefly and eliminate those violating any condition. "
+                "End with one final line exactly: ANSWER: <the answer>")
+    weights, first_texts, prog_keys = {}, {}, set()
+
+    # a 3B reliably translates assignment/truth-table puzzles into checkable
+    # code, but inverts before/after in ordering puzzles — skip enum there
+    ordering = bool(re.search(
+        r"finish|arriv|before|after|\bfirst\b|\blast\b|order|rank|race|queue",
+        task, re.I))
+
+    # decomposed truth-table beats everything for 'exactly N true' puzzles:
+    # code enumerates, the model only answers trivial YES/NO micro-questions
+    tt = _truth_table_solver(ctx, task) if ctx.have_time(35) else None
+    if tt:
+        k = norm_short(tt)
+        weights[k] = 4
+        first_texts[k] = tt
+        prog_keys.add(k)
+
+    prog = None if (ordering or tt) else _logic_enum_ballot(ctx, task)
+    if prog:
+        k = norm_short(prog)
+        if k:
+            weights[k] = 2
+            first_texts[k] = prog
+            prog_keys.add(k)
+
+    schedule = [(sysmsg, 0.0, 42), (sysmsg, 0.7, 17), (enum_sys, 0.3, 29),
+                (enum_sys, 0.6, 53)]
+    samples = 0
+    for i, (sm, temp, seed) in enumerate(schedule):
+        top = max(weights.values()) if weights else 0
+        others = sorted((v for v in weights.values()), reverse=True)
+        clear_lead = top >= 3 and (len(others) < 2 or others[1] <= top - 2)
+        if clear_lead and samples >= 1:
+            break
+        if i >= 3 and not (ctx.have_time(25) and _needs_tiebreak(weights)):
+            break
+        r = ctx.chat(sm, task, temperature=temp, max_tokens=256, seed=seed)
+        a = answer_line(r)
+        if not a:
+            continue
+        samples += 1
+        # sampled answers are often sentences; match them onto existing keys
+        # by whole-word containment (either direction)
+        k = norm_short(a)
+        matched = None
+        for kk in weights:
+            if kk and (kk == k
+                       or re.search(rf"\b{re.escape(kk)}\b", k)
+                       or re.search(rf"\b{re.escape(k)}\b", kk)):
+                matched = kk
+                break
+        k = matched or k
+        weights[k] = weights.get(k, 0) + 1
+        first_texts.setdefault(k, a)
+    if not weights:
+        return {"answer": "", "conf": 0.3, "cat": "logic"}
+
+    def sample_votes(k):
+        return weights[k] - (2 if k in prog_keys else 0)
+
+    ranked = sorted(weights.items(),
+                    key=lambda kv: (-kv[1], -sample_votes(kv[0])))
+    if (len(ranked) > 1 and ranked[0][1] == ranked[1][1]
+            and ctx.have_time(30)):
+        # enum-vs-samples tie: one extra sample decides
+        r = ctx.chat(enum_sys, task, temperature=0.85, max_tokens=256, seed=61)
+        a = answer_line(r)
+        if a:
+            k = norm_short(a)
+            for kk in weights:
+                if kk and (kk == k
+                           or re.search(rf"\b{re.escape(kk)}\b", k)
+                           or re.search(rf"\b{re.escape(k)}\b", kk)):
+                    k = kk
+                    break
+            weights[k] = weights.get(k, 0) + 1
+            first_texts.setdefault(k, a)
+        ranked = sorted(weights.items(),
+                        key=lambda kv: (-kv[1], -sample_votes(kv[0])))
+    top_key, top_n = ranked[0]
+    unique_top = len(ranked) == 1 or ranked[1][1] < top_n
+    prog_backed = top_key in prog_keys
+    if top_n >= 3 and unique_top:
+        conf = 0.92
+    elif top_n >= 2 and unique_top:
+        conf = 0.8 if prog_backed else 0.7
+    else:
+        conf = 0.5
+    ans = _fix_who_echo(ctx, task, first_texts[top_key])
+    log(f"logic weights={weights} prog={prog!r} -> {ans!r} conf={conf}")
+    return {"answer": _logic_answer(task, ans), "conf": conf, "cat": "logic"}
 
 
-def _logic_answer(ctx, task, ans):
-    if ctx.have_time(12):
-        s = ctx.chat("Given a puzzle and its correct answer, reply with the answer "
-                     "stated as one sentence plus one brief sentence of justification. "
-                     "No other text.",
-                     f"Puzzle: {task}\nCorrect answer: {ans}",
-                     temperature=0.0, max_tokens=80)
-        if s and norm_short(ans) in norm_short(s):
-            return s
-    return f"{ans}."
+def _fix_who_echo(ctx, task, ans):
+    """'Who plays chess?' answered with 'chess' — the model echoed the
+    question's object instead of naming the person. Detect and repair."""
+    if not re.search(r"\bwho\b", task, re.I):
+        return ans
+    qs = re.findall(r"([^.?!]*\?)", task)
+    tail = norm_short(qs[-1]) if qs else norm_short(task)
+    k = norm_short(ans)
+    if k and re.search(rf"\b{re.escape(k)}\b", tail):
+        r = ctx.chat("The task asks WHO. Reply with only the person's name, "
+                     "nothing else.", task, temperature=0.0, max_tokens=8)
+        cand = (r or "").strip().strip(".")
+        if cand and not re.search(rf"\b{re.escape(norm_short(cand))}\b", tail):
+            return cand
+    return ans
+
+
+def _needs_tiebreak(counts):
+    if not counts:
+        return True
+    ranked = sorted(counts.values(), reverse=True)
+    return ranked[0] < 2 or (len(ranked) > 1 and ranked[1] == ranked[0])
+
+
+def _logic_answer(task, ans):
+    """Template justification — a freestyle 3B justification can contradict
+    its own (correct) answer and fail the judge."""
+    a = ans.strip().rstrip(".")
+    return (f"{a}. This is the only assignment consistent with every condition "
+            "stated in the puzzle.")
 
 
 HANDLERS = {

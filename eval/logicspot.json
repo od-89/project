@@ -1,0 +1,7 @@
+[
+  { "task_id": "box-1", "prompt": "Three boxes are labeled A, B, and C. Exactly one contains a prize. The note on A says 'The prize is here.' The note on B says 'The prize is not here.' The note on C says 'The prize is not in A.' Exactly one note is true. Which box contains the prize?", "expect_contains": "B." },
+  { "task_id": "box-2", "prompt": "Three boxes are labeled A, B, and C. Exactly one contains a prize. The note on A says 'The prize is here.' The note on B says 'The prize is not here.' The note on C says 'The prize is not in A.' Exactly one note is true. Which box contains the prize?", "expect_contains": "B." },
+  { "task_id": "race-1", "prompt": "Four runners finished a race. Maya finished before Noah but after Omar. Priya finished last. Who won the race?", "expect_contains": "Omar" },
+  { "task_id": "pets-1", "prompt": "Three friends, Sam, Jo, and Lee, each own a different pet: cat, dog, bird. Sam does not own the bird. Jo owns the dog. Who owns the cat?", "expect_contains": "Sam" },
+  { "task_id": "truth-1", "prompt": "Three boxes are labeled A, B, and C. Exactly one contains a prize. The note on A says 'The prize is in B.' The note on B says 'The prize is in B.' The note on C says 'The prize is not in C.' Exactly one note is true. Which box contains the prize?", "expect_contains": "A" }
+]

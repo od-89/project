@@ -38,6 +38,7 @@ class LocalLLM:
             "--jinja",
             "-np", "1",
             "--no-webui",
+            "--cache-reuse", "256",
         ]
         log = sys.stderr
         self.proc = subprocess.Popen(args, stdout=log, stderr=log)

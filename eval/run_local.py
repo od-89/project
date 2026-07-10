@@ -29,8 +29,9 @@ run_tasks = [{"task_id": t["task_id"], "prompt": t["prompt"]} for t in tasks]
 
 out_dir = ROOT / "eval" / "out"
 out_dir.mkdir(parents=True, exist_ok=True)
-inp = out_dir / "tasks.json"
-outp = out_dir / "results.json"
+stem = pathlib.Path(tasks_file).stem
+inp = out_dir / f"tasks-{stem}.json"
+outp = out_dir / f"results-{stem}.json"
 inp.write_text(json.dumps(run_tasks), encoding="utf-8")
 if outp.exists():
     outp.unlink()

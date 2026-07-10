@@ -1,0 +1,6 @@
+[
+  { "task_id": "v-math-05", "prompt": "A class has 32 students and 3/8 of them are boys. How many girls are in the class?", "expect_num": 20 },
+  { "task_id": "v-math-05b", "prompt": "A school club has 48 members and 5/12 of them are seniors. How many members are not seniors?", "expect_num": 28 },
+  { "task_id": "v-math-07", "prompt": "A jacket originally costs $150. It is discounted by 30%, and then a further 10% is taken off the reduced price. What is the final price in dollars?", "expect_num": 94.5 },
+  { "task_id": "p-01", "prompt": "What is the capital of Australia, and what body of water is it near?", "expect_contains": "Canberra" }
+]

@@ -1,0 +1,4 @@
+[
+  { "task_id": "who-1", "prompt": "Anna, Ben, and Carl each play a different sport: tennis, soccer, or chess. Anna does not play chess. Ben plays soccer. Who plays chess?", "expect_contains": "Carl" },
+  { "task_id": "who-2", "prompt": "Three friends, Sam, Jo, and Lee, each own a different pet: cat, dog, bird. Sam does not own the bird. Jo owns the dog. Who owns the cat?", "expect_contains": "Sam" }
+]

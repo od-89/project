@@ -1,0 +1,12 @@
+[
+  { "task_id": "practice-05", "prompt": "Extract all named entities and their types from: Maria Sanchez joined Fireworks AI in Berlin last March.", "expect_contains": "Maria Sanchez" },
+  { "task_id": "practice-07", "prompt": "Three friends, Sam, Jo, and Lee, each own a different pet: cat, dog, bird. Sam does not own the bird. Jo owns the dog. Who owns the cat?", "expect_contains": "Sam" },
+  { "task_id": "v-math-06", "prompt": "Tickets cost $12 for adults and $7 for children. A family buys 2 adult tickets and 3 child tickets. They pay with a $50 bill. How much change do they receive?", "expect_num": 5 },
+  { "task_id": "v-logic-04", "prompt": "Three boxes are labeled A, B, and C. Exactly one contains a prize. The note on A says 'The prize is here.' The note on B says 'The prize is not here.' The note on C says 'The prize is not in A.' Exactly one note is true. Which box contains the prize?", "expect_contains": "B" },
+  { "task_id": "v-gen-04", "prompt": "Write a Python function that returns True if a string is a palindrome, ignoring case and spaces." },
+  { "task_id": "practice-05x", "prompt": "Extract all named entities and their types from: Maria Sanchez joined Fireworks AI in Berlin last March.", "expect_contains": "Maria Sanchez" },
+  { "task_id": "practice-07x", "prompt": "Three friends, Sam, Jo, and Lee, each own a different pet: cat, dog, bird. Sam does not own the bird. Jo owns the dog. Who owns the cat?", "expect_contains": "Sam" },
+  { "task_id": "v-math-06x", "prompt": "Tickets cost $12 for adults and $7 for children. A family buys 2 adult tickets and 3 child tickets. They pay with a $50 bill. How much change do they receive?", "expect_num": 5 },
+  { "task_id": "v-logic-04x", "prompt": "Three boxes are labeled A, B, and C. Exactly one contains a prize. The note on A says 'The prize is here.' The note on B says 'The prize is not here.' The note on C says 'The prize is not in A.' Exactly one note is true. Which box contains the prize?", "expect_contains": "B" },
+  { "task_id": "v-gen-04x", "prompt": "Write a Python function that returns True if a string is a palindrome, ignoring case and spaces." }
+]
