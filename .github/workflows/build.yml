@@ -1,0 +1,84 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/zerofire-agent
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push (zero mode)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          build-args: |
+            MODE=zero
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build and push (hybrid mode)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:hybrid
+          build-args: |
+            MODE=hybrid
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run container against practice tasks (2 cpu / 4 GB, like the judge)
+        run: |
+          mkdir -p /tmp/in /tmp/out
+          cp eval/practice_tasks.json /tmp/in/tasks.json
+          time docker run --rm --cpus=2 --memory=4g \
+            -v /tmp/in:/input:ro -v /tmp/out:/output \
+            ${{ env.IMAGE }}:latest
+          echo "----- results -----"
+          cat /tmp/out/results.json
+      - name: Validate results schema
+        run: |
+          python3 - <<'EOF'
+          import json
+          tasks = json.load(open('/tmp/in/tasks.json'))
+          res = json.load(open('/tmp/out/results.json'))
+          exp = {t['task_id'] for t in tasks}
+          got = {r['task_id'] for r in res}
+          assert isinstance(res, list), 'results must be a list'
+          assert exp == got, f'id mismatch: missing={exp-got} extra={got-exp}'
+          for r in res:
+              assert isinstance(r['answer'], str) and r['answer'].strip(), f"empty answer for {r['task_id']}"
+          print(f'OK: {len(res)} answers, all non-empty')
+          EOF

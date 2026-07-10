@@ -1,0 +1,11 @@
+[
+  { "task_id": "v-sent-03", "prompt": "Classify the sentiment of this review: The food arrived quickly and tasted amazing, but the delivery fee was outrageous and the app kept freezing.", "expect_contains": "Mixed" },
+  { "task_id": "v-sent-01b", "prompt": "Classify the sentiment of this review and justify your answer: Absolutely love this vacuum - it picks up everything and the battery lasts forever.", "expect_contains": "Positive" },
+  { "task_id": "v-sent-02b", "prompt": "Classify the sentiment of this comment: The checkout process kept crashing and support never replied. Total waste of money.", "expect_contains": "Negative" },
+  { "task_id": "v-sent-04", "prompt": "Determine the sentiment of this feedback and explain why: The hotel room was spotless and the staff friendly, yet the constant street noise made sleeping nearly impossible.", "expect_contains": "Mixed" },
+  { "task_id": "v-dbg-03", "prompt": "This function should count how many times a word appears in a sentence, ignoring case, but it fails: def count_word(sentence, word): return sentence.split().count(word). Fix it." },
+  { "task_id": "v-dbg-04", "prompt": "This function should check if a number is even but returns wrong results: def is_even(n): return n % 2 == 1. Find and fix the bug." },
+  { "task_id": "v-dbg-05", "prompt": "This function should return a list reversed without modifying the original, but it does not work as intended: def reversed_copy(lst): lst.reverse(); return lst. Fix it.", "expect_contains": "[::-1]" },
+  { "task_id": "v-gen-04", "prompt": "Write a Python function that returns True if a string is a palindrome, ignoring case and spaces." },
+  { "task_id": "v-gen-05", "prompt": "Write a Python function that finds the most frequent element in a list; if there is a tie, return any one of the most frequent." }
+]
