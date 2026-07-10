@@ -344,59 +344,141 @@ def _ner_lines(text):
     return out
 
 
-def _spec_tests(ctx, task, code):
-    """Ask for asserts derived from the task description alone (independent of
-    the generated code). Returns a compilable assert block or None."""
-    m = re.search(r"def\s+(\w+)\s*\(", code)
+_FUZZ_POOLS = [
+    (re.compile(r"sentence|text|string|phrase|paragraph|message", re.I),
+     ["Hello world hello", "Cat cat CAT dog", "a B a b A"]),
+    (re.compile(r"word|target|term|key$|substr|pattern|char", re.I),
+     ["hello", "cat", "a"]),
+    (re.compile(r"nums|numbers|lst|list|arr|array|values|items|data|elements|seq", re.I),
+     [[3, 1, 4, 1, 5, 9, 2, 6], [2, 2, 2], [-5, 0, 5, 10], [7]]),
+    (re.compile(r"words|strings|names|tokens", re.I),
+     [["apple", "banana", "apple"], ["x"], []]),
+    (re.compile(r"^s$|^st$", re.I), ["Level madam", "abc CBA", "Noon"]),
+    (re.compile(r"^n$|^num$|count|limit|size|^k$|^m$|^x$|^a$|^b$|number", re.I),
+     [0, 1, 2, 7, 10, -3]),
+    (re.compile(r"dict|mapping|^d$|^map$", re.I), [{"a": 1, "b": 2}, {}]),
+]
+
+
+def _fn_signature(code):
+    m = re.search(r"def\s+(\w+)\s*\(([^)]*)\)", code or "")
     if not m:
-        return None
-    fname = m.group(1)
-    t = ctx.chat("From the task description alone, write up to 3 Python assert "
-                 f"statements that check the required behavior of the function "
-                 f"named '{fname}'. Derive the expected values ONLY from the task "
-                 "description, not from any code. Use simple literal inputs. "
-                 "IMPORTANT: directly exercise the specific requirement the task "
-                 "states (e.g. mixed UPPER/lower case if it says ignoring case; "
-                 "duplicates if it mentions duplicates; empty input if mentioned). "
-                 "Output only the assert lines, nothing else.",
-                 task, temperature=0.0, max_tokens=170)
-    lines = [ln.strip() for ln in (t or "").splitlines()
-             if ln.strip().startswith("assert") and fname in ln]
-    if not lines:
-        return None
-    tests = "\n".join(lines[:3])
-    ok, _ = compiles(tests)
-    if not ok:
-        return None
-    log(f"spec-tests for {fname}: {tests!r}")
-    return tests
+        return None, None
+    params = []
+    for p in m.group(2).split(","):
+        p = p.strip()
+        if not p or p.startswith("*") or "=" in p:
+            continue
+        params.append(p.split(":")[0].strip())
+    return m.group(1), params
 
 
-def _verify_with_spec_tests(ctx, task, sysmsg, reply, code, max_tok):
-    """Run spec-derived asserts against code; on failure try one repair.
-    Returns (reply, code, conf) or None when tests are unavailable."""
-    if not ctx.have_time(20):
+def _fuzz_argsets(params, n=4):
+    pools = []
+    for name in params:
+        pool = None
+        for rx, vals in _FUZZ_POOLS:
+            if rx.search(name):
+                pool = vals
+                break
+        if pool is None:
+            return None
+        pools.append(pool)
+    if not pools:
         return None
-    tests = _spec_tests(ctx, task, code)
-    if not tests:
+    sets_ = []
+    for i in range(n):
+        sets_.append([pool[i % len(pool)] for pool in pools])
+    return sets_
+
+
+def _differential_compare(code_a, code_b, fname, argsets):
+    """Execute two implementations on the same inputs in a sandbox.
+    Returns (comparable, mismatches, first_mismatch_desc)."""
+    import json as _json
+    script = (
+        "import json\n"
+        f"ns1, ns2 = {{}}, {{}}\n"
+        f"exec({code_a!r}, ns1)\n"
+        f"exec({code_b!r}, ns2)\n"
+        f"argsets = json.loads({_json.dumps(argsets)!r})\n"
+        "rows = []\n"
+        "for a in argsets:\n"
+        "    try:\n"
+        f"        r1 = repr(ns1[{fname!r}](*[__import__('copy').deepcopy(x) for x in a]))\n"
+        "    except Exception as e:\n"
+        "        r1 = 'ERR:' + type(e).__name__\n"
+        "    try:\n"
+        f"        r2 = repr(ns2[{fname!r}](*[__import__('copy').deepcopy(x) for x in a]))\n"
+        "    except Exception as e:\n"
+        "        r2 = 'ERR:' + type(e).__name__\n"
+        "    rows.append([repr(a), r1, r2])\n"
+        "print(json.dumps(rows))\n"
+    )
+    ok, out, err = run_python(script, timeout=10)
+    if not ok or not out:
+        return 0, 0, ""
+    try:
+        rows = _json.loads(out.splitlines()[-1])
+    except Exception:
+        return 0, 0, ""
+    comparable = mism = 0
+    desc = ""
+    for args_r, r1, r2 in rows:
+        if r1.startswith("ERR:") or r2.startswith("ERR:"):
+            continue
+        comparable += 1
+        if r1 != r2:
+            mism += 1
+            if not desc:
+                desc = f"input {args_r}: candidate returns {r1}, reference returns {r2}"
+    return comparable, mism, desc
+
+
+def _reference_impl(ctx, task, fname, seed=77):
+    r = ctx.chat("Write a correct, self-contained Python function that does "
+                 f"exactly what the task requires. Name it '{fname}'. Handle the "
+                 "specific requirements stated in the task precisely. "
+                 "Output only the code, no explanations.",
+                 task, temperature=0.4, max_tokens=380, seed=seed)
+    ref = extract_code(r)
+    if ref and compiles(ref)[0] and re.search(rf"def\s+{re.escape(fname)}\s*\(", ref):
+        return ref
+    return None
+
+
+def _differential_verify(ctx, task, code, sysmsg, max_tok):
+    """Cross-check candidate code against an independently written reference
+    implementation on fuzz inputs. Returns (code, conf) or None if inconclusive."""
+    fname, params = _fn_signature(code)
+    if not fname or not params:
         return None
-    ok, _, err = run_python(code + "\n\n" + tests)
-    if ok:
-        return (reply, code, 0.93)
-    if not ctx.have_time(30):
+    argsets = _fuzz_argsets(params)
+    if not argsets or not ctx.have_time(25):
+        return None
+    ref = _reference_impl(ctx, task, fname)
+    if not ref:
+        return None
+    comparable, mism, desc = _differential_compare(code, ref, fname, argsets)
+    log(f"differential {fname}: comparable={comparable} mismatches={mism} {desc[:120]}")
+    if comparable >= 2 and mism == 0:
+        return (code, 0.93)
+    if mism == 0:
+        return None  # not enough signal
+    if not ctx.have_time(35):
         return None
     reply2 = ctx.chat(sysmsg,
-                      f"{task}\n\nYour previous solution failed this check:\n"
-                      f"{tests}\nFailure: {err[-220:]}\n"
-                      "Provide the fully corrected code.",
-                      temperature=0.25, max_tokens=max_tok, seed=41)
+                      f"{task}\n\nNote: two candidate implementations disagree — "
+                      f"{desc}. Re-read the task requirements carefully and provide "
+                      "the correct code.",
+                      temperature=0.2, max_tokens=max_tok, seed=43)
     code2 = extract_code(reply2)
-    ok2c, _ = compiles(code2) if code2 else (False, "")
-    if ok2c and _smoke_call(code2) is None:
-        ok2, _, _ = run_python(code2 + "\n\n" + tests)
-        if ok2:
-            return (reply2, code2, 0.9)
-    return None
+    if code2 and compiles(code2)[0]:
+        c2, m2, _ = _differential_compare(code2, ref, fname, argsets)
+        if c2 >= 2 and m2 == 0:
+            return (code2, 0.88)
+    # the fresh reference tends to beat an anchored fix for small models
+    return (ref, 0.6)
 
 
 def h_code_debug(task, ctx):
@@ -410,10 +492,12 @@ def h_code_debug(task, ctx):
     if ok:
         smoke_err = _smoke_call(code)
     if ok and smoke_err is None:
-        verified = _verify_with_spec_tests(ctx, task, sysmsg, reply, code, 380)
+        verified = _differential_verify(ctx, task, code, sysmsg, 380)
         if verified:
-            r, c, conf = verified
-            return {"answer": _debug_answer(r, c), "conf": conf, "cat": "code_debug"}
+            c, conf = verified
+            ans = (_debug_answer(reply, c) if c == code
+                   else _debug_answer_recut(ctx, task, reply, c))
+            return {"answer": ans, "conf": conf, "cat": "code_debug"}
         return {"answer": _debug_answer(reply, code), "conf": 0.75, "cat": "code_debug"}
     if ctx.have_time(35):
         reply2 = ctx.chat(sysmsg,
@@ -424,10 +508,12 @@ def h_code_debug(task, ctx):
         code2 = extract_code(reply2)
         ok2, err2 = compiles(code2) if code2 else (False, "no code")
         if ok2 and _smoke_call(code2) is None:
-            verified = _verify_with_spec_tests(ctx, task, sysmsg, reply2, code2, 380)
+            verified = _differential_verify(ctx, task, code2, sysmsg, 380)
             if verified:
-                r, c, conf = verified
-                return {"answer": _debug_answer(r, c), "conf": conf, "cat": "code_debug"}
+                c, conf = verified
+                ans = (_debug_answer(reply2, c) if c == code2
+                       else _debug_answer_recut(ctx, task, reply2, c))
+                return {"answer": ans, "conf": conf, "cat": "code_debug"}
             return {"answer": _debug_answer(reply2, code2), "conf": 0.7, "cat": "code_debug"}
         if ok2:
             return {"answer": _debug_answer(reply2, code2), "conf": 0.55, "cat": "code_debug"}
@@ -444,6 +530,17 @@ def _debug_answer(reply, code):
             first = ln
             break
     return (first + "\n\n" if first else "") + f"```python\n{code}\n```"
+
+
+def _debug_answer_recut(ctx, task, reply, final_code):
+    """Final code was replaced during verification — restate the bug for the
+    code we actually ship."""
+    sent = ctx.chat("In one short sentence, state the bug in the original code "
+                    "shown in the task (what it fails to do).",
+                    task, temperature=0.0, max_tokens=60)
+    if not sent:
+        sent = "The original code does not implement the stated requirement."
+    return sent.strip() + "\n\n" + f"```python\n{final_code}\n```"
 
 
 _ARG_GUESS = [
@@ -495,9 +592,9 @@ def h_code_gen(task, ctx):
         ran, out, rerr = run_python(code)
         err = rerr[-300:] if not ran else ""
     if ok and ran:
-        verified = _verify_with_spec_tests(ctx, task, sysmsg, reply, code, 420)
+        verified = _differential_verify(ctx, task, code, sysmsg, 420)
         if verified:
-            _, c, conf = verified
+            c, conf = verified
             return {"answer": _gen_answer(c), "conf": conf, "cat": "code_gen"}
         return {"answer": _gen_answer(code), "conf": 0.8, "cat": "code_gen"}
     if ctx.have_time(35):

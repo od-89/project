@@ -1,0 +1,203 @@
+[
+ {
+  "task_id": "practice-01",
+  "prompt": "What is the capital of Australia, and what body of water is it near?"
+ },
+ {
+  "task_id": "practice-02",
+  "prompt": "A store has 240 items. It sells 15% on Monday and 60 more on Tuesday. How many items remain?"
+ },
+ {
+  "task_id": "practice-03",
+  "prompt": "Classify the sentiment of this review: The battery life is great, but the screen scratches too easily."
+ },
+ {
+  "task_id": "practice-04",
+  "prompt": "Summarize the following in exactly one sentence: The city council met on Thursday to debate the new transit plan. After four hours of testimony from residents, business owners, and engineers, the council voted 6-3 to approve a dedicated bus lane on Main Street, with construction beginning next spring and expected to cut average commute times by twelve minutes."
+ },
+ {
+  "task_id": "practice-05",
+  "prompt": "Extract all named entities and their types from: Maria Sanchez joined Fireworks AI in Berlin last March."
+ },
+ {
+  "task_id": "practice-06",
+  "prompt": "This function should return the max of a list but has a bug: def get_max(nums): return nums[0]. Find and fix it."
+ },
+ {
+  "task_id": "practice-07",
+  "prompt": "Three friends, Sam, Jo, and Lee, each own a different pet: cat, dog, bird. Sam does not own the bird. Jo owns the dog. Who owns the cat?"
+ },
+ {
+  "task_id": "practice-08",
+  "prompt": "Write a Python function that returns the second-largest number in a list, handling duplicates correctly."
+ },
+ {
+  "task_id": "v-math-01",
+  "prompt": "A warehouse stores 500 boxes. 12% ship out on Friday and 45 more on Saturday. How many boxes remain?",
+  "expect_num": 395
+ },
+ {
+  "task_id": "v-math-02",
+  "prompt": "A phone costs $80 after a 20% discount. What was the original price in dollars?",
+  "expect_num": 100
+ },
+ {
+  "task_id": "v-math-03",
+  "prompt": "A car travels 180 km in 2.5 hours. What is its average speed in km/h?",
+  "expect_num": 72
+ },
+ {
+  "task_id": "v-math-04",
+  "prompt": "A company's revenue is $2,000 this month. If it grows by 15% each month, what will the revenue be after 2 months, in dollars?",
+  "expect_num": 2645
+ },
+ {
+  "task_id": "v-math-05",
+  "prompt": "A class has 32 students and 3/8 of them are boys. How many girls are in the class?",
+  "expect_num": 20
+ },
+ {
+  "task_id": "v-math-06",
+  "prompt": "Tickets cost $12 for adults and $7 for children. A family buys 2 adult tickets and 3 child tickets. They pay with a $50 bill. How much change do they receive?",
+  "expect_num": 5
+ },
+ {
+  "task_id": "v-logic-01",
+  "prompt": "Anna, Ben, and Carl each play a different sport: tennis, soccer, or chess. Anna does not play chess. Ben plays soccer. Who plays chess?",
+  "expect_contains": "Carl"
+ },
+ {
+  "task_id": "v-logic-02",
+  "prompt": "Four runners finished a race. Maya finished before Noah but after Omar. Priya finished last. Who won the race?",
+  "expect_contains": "Omar"
+ },
+ {
+  "task_id": "v-logic-03",
+  "prompt": "Lena, Max, and Nina each drink a different beverage: coffee, tea, or juice. Max does not drink tea. Nina drinks juice. Who drinks tea?",
+  "expect_contains": "Lena"
+ },
+ {
+  "task_id": "v-logic-04",
+  "prompt": "Three boxes are labeled A, B, and C. Exactly one contains a prize. The note on A says 'The prize is here.' The note on B says 'The prize is not here.' The note on C says 'The prize is not in A.' Exactly one note is true. Which box contains the prize?",
+  "expect_contains": "B"
+ },
+ {
+  "task_id": "v-sent-01",
+  "prompt": "Classify the sentiment of this review and justify your answer: Absolutely love this vacuum - it picks up everything and the battery lasts forever.",
+  "expect_contains": "Positive"
+ },
+ {
+  "task_id": "v-sent-02",
+  "prompt": "Classify the sentiment of this comment: The checkout process kept crashing and support never replied. Total waste of money.",
+  "expect_contains": "Negative"
+ },
+ {
+  "task_id": "v-sent-03",
+  "prompt": "Classify the sentiment of this review: The food arrived quickly and tasted amazing, but the delivery fee was outrageous and the app kept freezing.",
+  "expect_contains": "Mixed"
+ },
+ {
+  "task_id": "v-sum-01",
+  "prompt": "Summarize the following in exactly one sentence: Researchers at the marine institute spent three years tracking humpback whale migration using satellite tags. They discovered that the whales travel nearly 5,000 miles each way, navigate with remarkable precision along routes they appear to memorize, and time their departures to ocean temperature shifts rather than daylight cues, a finding that could reshape how shipping lanes are managed seasonally."
+ },
+ {
+  "task_id": "v-sum-02",
+  "prompt": "Summarize this text in at most 12 words: The new library branch opened downtown on Saturday with a children's reading room, free computer classes for seniors, a recording studio for teenagers, and extended weekend hours intended to serve working families who cannot visit on weekdays."
+ },
+ {
+  "task_id": "v-sum-03",
+  "prompt": "Condense the following into 2 sentences: The startup began as a weekend project between two college roommates who wanted to split grocery bills more easily. Within a year the app had a million users. Investors followed quickly, and the company now processes payments in twelve countries. Despite the growth, the founders insist on keeping the team under fifty people, arguing that small teams ship faster and stay closer to users."
+ },
+ {
+  "task_id": "v-ner-01",
+  "prompt": "Extract all named entities and their types from: Tim Cook announced Apple's new campus in Austin on 5 June 2024.",
+  "expect_contains": "Austin"
+ },
+ {
+  "task_id": "v-ner-02",
+  "prompt": "Extract the named entities and label their types: Dr. Elena Petrova of Oxford University received a EUR 2 million grant from the European Research Council in October.",
+  "expect_contains": "Oxford"
+ },
+ {
+  "task_id": "v-ner-03",
+  "prompt": "List all named entities with their types from this sentence: The Falcon 9 rocket launched from Cape Canaveral carrying a Starlink payload for SpaceX on Tuesday morning.",
+  "expect_contains": "SpaceX"
+ },
+ {
+  "task_id": "v-fact-01",
+  "prompt": "What is the capital of Canada, and what river runs through it?",
+  "expect_contains": "Ottawa"
+ },
+ {
+  "task_id": "v-fact-02",
+  "prompt": "Who wrote the novel 1984, and in what year was it first published?",
+  "expect_contains": "Orwell"
+ },
+ {
+  "task_id": "v-fact-03",
+  "prompt": "What is the boiling point of water at sea level in both Celsius and Fahrenheit?",
+  "expect_contains": "212"
+ },
+ {
+  "task_id": "v-fact-04",
+  "prompt": "Explain what photosynthesis is and name the organelle where it takes place in plant cells.",
+  "expect_contains": "chloroplast"
+ },
+ {
+  "task_id": "v-dbg-01",
+  "prompt": "This function should sum the numbers from 1 to n inclusive but has a bug: def total(n): return sum(range(n)). Find and fix it.",
+  "expect_contains": "n + 1"
+ },
+ {
+  "task_id": "v-dbg-02",
+  "prompt": "This function should return the minimum of a list but is wrong: def find_min(nums):\n    m = 0\n    for x in nums:\n        if x < m:\n            m = x\n    return m\nFind the bug and provide corrected code."
+ },
+ {
+  "task_id": "v-dbg-03",
+  "prompt": "This function should count how many times a word appears in a sentence, ignoring case, but it fails: def count_word(sentence, word): return sentence.split().count(word). Fix it."
+ },
+ {
+  "task_id": "v-gen-01",
+  "prompt": "Write a Python function that returns the number of vowels in a string, counting both uppercase and lowercase."
+ },
+ {
+  "task_id": "v-gen-02",
+  "prompt": "Write a Python function that takes a list of integers and returns a new list containing only the even numbers, preserving order."
+ },
+ {
+  "task_id": "v-gen-03",
+  "prompt": "Write a well-structured Python function that merges two sorted lists into one sorted list without using the built-in sort."
+ },
+ {
+  "task_id": "v-sent-01b",
+  "prompt": "Classify the sentiment of this review and justify your answer: Absolutely love this vacuum - it picks up everything and the battery lasts forever.",
+  "expect_contains": "Positive"
+ },
+ {
+  "task_id": "v-sent-02b",
+  "prompt": "Classify the sentiment of this comment: The checkout process kept crashing and support never replied. Total waste of money.",
+  "expect_contains": "Negative"
+ },
+ {
+  "task_id": "v-sent-04",
+  "prompt": "Determine the sentiment of this feedback and explain why: The hotel room was spotless and the staff friendly, yet the constant street noise made sleeping nearly impossible.",
+  "expect_contains": "Mixed"
+ },
+ {
+  "task_id": "v-dbg-04",
+  "prompt": "This function should check if a number is even but returns wrong results: def is_even(n): return n % 2 == 1. Find and fix the bug."
+ },
+ {
+  "task_id": "v-dbg-05",
+  "prompt": "This function should return a list reversed without modifying the original, but it does not work as intended: def reversed_copy(lst): lst.reverse(); return lst. Fix it.",
+  "expect_contains": "[::-1]"
+ },
+ {
+  "task_id": "v-gen-04",
+  "prompt": "Write a Python function that returns True if a string is a palindrome, ignoring case and spaces."
+ },
+ {
+  "task_id": "v-gen-05",
+  "prompt": "Write a Python function that finds the most frequent element in a list; if there is a tie, return any one of the most frequent."
+ }
+]
