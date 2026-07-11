@@ -124,6 +124,34 @@ def run():
 
     llm = LocalLLM()
     llm.start()
+
+    # hybrid: escalate-first. Fireworks answers the hard categories in a
+    # parallel wave at t~0 (immune to local CPU speed); the local pipeline
+    # covers easy categories and any failed calls.
+    fw_done = {}
+    if MODE == "hybrid":
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            from .fireworks import fw_answer
+            HARD = {"factual", "math", "logic", "code_debug", "code_gen"}
+            hard_items = [it for it in items if it["cat"] in HARD][:ESC_MAX]
+
+            def _esc(it):
+                text, tok = fw_answer(it["prompt"], it["cat"])
+                return it["id"], text
+
+            if hard_items:
+                with ThreadPoolExecutor(max_workers=4) as ex:
+                    for tid, text in ex.map(_esc, hard_items):
+                        if text:
+                            fw_done[tid] = text
+                log(f"escalate-first wave: {len(fw_done)}/{len(hard_items)} answered by Fireworks")
+                with _lock:
+                    _results.update(fw_done)
+                flush()
+        except Exception as e:
+            log(f"escalate-first error (falling back to local): {e}")
+
     if not llm.wait_ready(timeout=90):
         log("FATAL: local model failed to start")
         flush()
@@ -131,8 +159,9 @@ def run():
     log("local model ready")
 
     ctx = Ctx(llm)
-    work = sorted(items, key=lambda it: _CAT_ORDER.index(it["cat"]))
-    confs = {}
+    work = sorted((it for it in items if it["id"] not in fw_done),
+                  key=lambda it: _CAT_ORDER.index(it["cat"]))
+    confs = {it["id"]: 0.85 for it in items if it["id"] in fw_done}
 
     # ---- Pass 1 (fast): bank an answer for everything quickly
     ctx.fast = True
