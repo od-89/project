@@ -105,3 +105,4 @@ agent/            the agent (stdlib-only Python)
 Dockerfile        3-stage build: llama.cpp release + GGUF weights + slim runtime
 eval/             practice tasks, 29 checkable variants, local harness
 ```
+
