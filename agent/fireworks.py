@@ -79,7 +79,7 @@ def fw_answer(task_prompt: str, cat: str, max_tokens: int = 380):
                         "Authorization": f"Bearer {key}",
                     },
                 )
-                with urllib.request.urlopen(req, timeout=25, context=_SSL_CTX) as r:
+                with urllib.request.urlopen(req, timeout=18, context=_SSL_CTX) as r:
                     resp = json.loads(r.read().decode("utf-8", "replace"))
                 text = (resp["choices"][0]["message"]["content"] or "").strip()
                 usage = resp.get("usage") or {}

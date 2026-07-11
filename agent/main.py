@@ -165,8 +165,9 @@ def run():
     ctx.task_deadline = None
     weak = sorted((it for it in work if confs[it["id"]] < 0.9),
                   key=lambda it: confs[it["id"]])
+    pass2_cut = SOFT_DEADLINE - (100 if MODE == "hybrid" else 25)
     for it in weak:
-        if elapsed() > SOFT_DEADLINE - 25:
+        if elapsed() > pass2_cut:
             break
         log(f"pass2 verify {it['id']} (conf={confs[it['id']]:.2f})")
         try:
