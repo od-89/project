@@ -23,7 +23,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push (zero mode)
+      - name: Build and push (hybrid mode -> latest)
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -33,19 +33,19 @@ jobs:
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
           build-args: |
-            MODE=zero
+            MODE=hybrid
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Build and push (hybrid mode)
+      - name: Build and push (zero mode)
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.IMAGE }}:hybrid
+            ${{ env.IMAGE }}:zero
           build-args: |
-            MODE=hybrid
+            MODE=zero
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

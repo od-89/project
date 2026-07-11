@@ -6,9 +6,18 @@ token-accounted. Zero mode never imports/calls this.
 """
 import json
 import os
+import ssl
 import sys
 import urllib.error
 import urllib.request
+
+# Local-dev only: Avast MITMs HTTPS with a cert OpenSSL rejects. The judge VM
+# never sets this. Default: full verification.
+_SSL_CTX = None
+if os.environ.get("FW_INSECURE_SSL") == "1":
+    _SSL_CTX = ssl.create_default_context()
+    _SSL_CTX.check_hostname = False
+    _SSL_CTX.verify_mode = ssl.CERT_NONE
 
 _GENERAL_PREF = ("gemma", "llama", "qwen", "mini", "glm", "deepseek", "kimi")
 _CODE_PREF = ("code", "coder", "kimi", "qwen", "deepseek", "glm", "gemma")
@@ -70,7 +79,7 @@ def fw_answer(task_prompt: str, cat: str, max_tokens: int = 380):
                         "Authorization": f"Bearer {key}",
                     },
                 )
-                with urllib.request.urlopen(req, timeout=25) as r:
+                with urllib.request.urlopen(req, timeout=25, context=_SSL_CTX) as r:
                     resp = json.loads(r.read().decode("utf-8", "replace"))
                 text = (resp["choices"][0]["message"]["content"] or "").strip()
                 usage = resp.get("usage") or {}

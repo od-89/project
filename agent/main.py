@@ -66,11 +66,17 @@ def _watchdog():
 
 
 class Ctx:
-    """What handlers see: chat access + time awareness."""
+    """What handlers see: chat access + time awareness.
+
+    fast=True is the Pass-1 mode: only cheap verification (<=18s asks) is
+    allowed so every task banks an answer quickly; the expensive checks run
+    in Pass 2 with whatever wall-clock remains.
+    """
 
     def __init__(self, llm):
         self.llm = llm
         self.task_deadline = None  # absolute time.time() cap for current task
+        self.fast = False
 
     def chat(self, system, user, **kw):
         if elapsed() > HARD_DEADLINE - 6:
@@ -78,6 +84,8 @@ class Ctx:
         return self.llm.chat(system, user, **kw)
 
     def have_time(self, seconds_needed: float) -> bool:
+        if self.fast and seconds_needed > 18:
+            return False
         if elapsed() + seconds_needed > SOFT_DEADLINE:
             return False
         if self.task_deadline and time.time() + seconds_needed > self.task_deadline:
@@ -126,10 +134,11 @@ def run():
     work = sorted(items, key=lambda it: _CAT_ORDER.index(it["cat"]))
     confs = {}
 
-    # ---- Pass 1: bank an answer for everything
+    # ---- Pass 1 (fast): bank an answer for everything quickly
+    ctx.fast = True
     for i, it in enumerate(work):
         remaining = max(1, len(work) - i)
-        budget = max(12.0, (SOFT_DEADLINE - elapsed()) / remaining * 1.35)
+        budget = max(12.0, (SOFT_DEADLINE * 0.62 - elapsed()) / remaining * 1.25)
         ctx.task_deadline = time.time() + budget
         try:
             res = HANDLERS[it["cat"]](it["prompt"], ctx)
@@ -151,14 +160,15 @@ def run():
         log(f"[{i+1}/{len(work)}] {it['id']} cat={it['cat']} "
             f"conf={confs[it['id']]:.2f} len={len(res.get('answer',''))}")
 
-    # ---- Pass 2: re-attempt low-confidence tasks while time remains
+    # ---- Pass 2 (full): re-verify ascending by confidence while time remains
+    ctx.fast = False
     ctx.task_deadline = None
-    weak = sorted((it for it in work if confs[it["id"]] < 0.7),
+    weak = sorted((it for it in work if confs[it["id"]] < 0.9),
                   key=lambda it: confs[it["id"]])
     for it in weak:
         if elapsed() > SOFT_DEADLINE - 25:
             break
-        log(f"pass2 retry {it['id']} (conf={confs[it['id']]:.2f})")
+        log(f"pass2 verify {it['id']} (conf={confs[it['id']]:.2f})")
         try:
             res = HANDLERS[it["cat"]](it["prompt"], ctx)
         except Exception as e:

@@ -218,6 +218,8 @@ def h_math(task, ctx):
             break
         if i >= 3 and not ctx.have_time(20):
             break
+        if getattr(ctx, "fast", False) and len(ballots) >= 2:
+            break  # two ballots suffice for pass 1; pass 2 completes the vote
         v = _math_ballot(ctx, task, kind, temp, seed)
         if v is not None:
             ballots.append((kind, v))
@@ -794,6 +796,10 @@ def _truth_table_solver(ctx, task):
 
     sat = []
     for opt in options:
+        deadline = getattr(ctx, "task_deadline", None)
+        if deadline and __import__("time").time() > deadline - 2:
+            log("truth-table: task budget exhausted mid-way, aborting")
+            return None
         trues = 0
         for owner, st in statements:
             val = _tt_eval(ctx, task, st, owner, opt)
@@ -872,7 +878,7 @@ def h_logic(task, ctx):
 
     # decomposed truth-table beats everything for 'exactly N true' puzzles:
     # code enumerates, the model only answers trivial YES/NO micro-questions
-    tt = _truth_table_solver(ctx, task) if ctx.have_time(35) else None
+    tt = _truth_table_solver(ctx, task) if ctx.have_time(16) else None
     if tt:
         k = norm_short(tt)
         weights[k] = 4
@@ -896,6 +902,8 @@ def h_logic(task, ctx):
         clear_lead = top >= 3 and (len(others) < 2 or others[1] <= top - 2)
         if clear_lead and samples >= 1:
             break
+        if getattr(ctx, "fast", False) and samples >= 2:
+            break  # fast pass banks a 2-sample answer; pass 2 finishes the vote
         if i >= 3 and not (ctx.have_time(25) and _needs_tiebreak(weights)):
             break
         r = ctx.chat(sm, task, temperature=temp, max_tokens=256, seed=seed)
@@ -947,7 +955,9 @@ def h_logic(task, ctx):
     if top_n >= 3 and unique_top:
         conf = 0.92
     elif top_n >= 2 and unique_top:
-        conf = 0.8 if prog_backed else 0.7
+        # sample-only agreement in the fast pass is weak evidence — keep conf
+        # low so Pass 2 re-verifies with the executable solvers
+        conf = 0.8 if prog_backed else (0.55 if getattr(ctx, "fast", False) else 0.7)
     else:
         conf = 0.5
     ans = _fix_who_echo(ctx, task, first_texts[top_key])
