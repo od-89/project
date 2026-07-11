@@ -31,6 +31,7 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:v4h
             ${{ env.IMAGE }}:${{ github.sha }}
           build-args: |
             MODE=hybrid
