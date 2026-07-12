@@ -74,6 +74,10 @@ jobs:
           sbom: false
           tags: |
             ${{ env.IMAGE }}:z15v4
+            ${{ env.IMAGE }}:z15v5
+            ${{ env.IMAGE }}:z15v6
+            ${{ env.IMAGE }}:z15v7
+            ${{ env.IMAGE }}:z15v8
           build-args: |
             MODE=zero
             MODEL_URL=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
@@ -104,15 +108,22 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Run container against practice tasks (2 cpu / 4 GB, like the judge)
+      - name: Run z15v4 (1.5B) against practice tasks (2 cpu / hard 4 GB, like the judge)
         run: |
           mkdir -p /tmp/in /tmp/out
           cp eval/practice_tasks.json /tmp/in/tasks.json
-          time docker run --rm --cpus=2 --memory=4g \
+          set +e
+          time docker run --rm --cpus=2 --memory=4g --memory-swap=4g \
+            --name zf_smoke \
             -v /tmp/in:/input:ro -v /tmp/out:/output \
-            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:z15v4
+          code=$?
+          echo "CONTAINER_EXIT_CODE=$code"
+          if [ $code -eq 137 ]; then echo "::error::OOM-KILLED (exit 137) under 4 GB — this WOULD cause judge INFRA_ERROR"; fi
+          set -e
           echo "----- results -----"
           cat /tmp/out/results.json
+          test $code -eq 0
       - name: Validate results schema
         run: |
           python3 - <<'EOF'
