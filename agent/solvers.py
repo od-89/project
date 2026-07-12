@@ -346,8 +346,10 @@ def _target_sentences(task):
 
 
 def h_summarize(task, ctx):
-    a = ctx.chat("You are a precise summarizer. Follow the length/format constraint "
-                 "stated in the task EXACTLY. Output only the summary, nothing else.",
+    a = ctx.chat("You are a precise summarizer. Use ONLY facts explicitly stated in "
+                 "the text — never invent numbers, names, or details that are not "
+                 "present. Follow the length/format constraint stated in the task "
+                 "EXACTLY. Output only the summary, nothing else.",
                  task, temperature=0.0, max_tokens=170)
     if not a:
         return {"answer": "", "conf": 0.2, "cat": "summarize"}
@@ -403,13 +405,32 @@ def h_ner(task, ctx):
     if not lines:
         return {"answer": a or "", "conf": 0.3, "cat": "ner"}
     lines = _merge_adjacent_entities(lines, task)
+    lines += _regex_entities(task)  # deterministically catch money/percent the model drops
     seen, out = set(), []
     for ln in lines:
-        k = norm_short(ln)
+        m = re.match(r"(.+?)\s-\s", ln)
+        k = norm_short(m.group(1)) if m else norm_short(ln)
         if k and k not in seen:
             seen.add(k)
             out.append(ln)
     return {"answer": "\n".join(out), "conf": 0.85, "cat": "ner"}
+
+
+def _regex_entities(source):
+    """Deterministically extract money/percent entities (a weak model often
+    drops these). Returns 'Entity - Type' lines found verbatim in the text."""
+    out = []
+    money = re.findall(
+        r"(?:(?:USD|EUR|GBP|US\$|C\$|A\$)\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:million|billion|thousand|k|m|bn))?"
+        r"|[$€£]\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:million|billion|thousand))?"
+        r"|\d[\d,]*(?:\.\d+)?\s?(?:dollars|euros|pounds|USD|EUR|GBP)"
+        r"|\d[\d,]*(?:\.\d+)?\s?(?:million|billion)\s+(?:dollars|euros|pounds))",
+        source, re.I)
+    for mval in money:
+        out.append(f"{mval.strip()} - Money")
+    for pct in re.findall(r"\d[\d,]*(?:\.\d+)?\s?%|\d[\d,]*(?:\.\d+)?\s?percent", source, re.I):
+        out.append(f"{pct.strip()} - Percent")
+    return out
 
 
 def _merge_adjacent_entities(lines, source):
@@ -968,6 +989,64 @@ def _ordering_solver(task):
     return won
 
 
+_ASSIGN_VERBS = (r"owns?|has|have|plays?|drinks?|drives?|likes?|keeps?|wears?|"
+                 r"lives?\s+in|prefers?|rides?|studies|teaches?")
+
+
+def _assignment_solver(task):
+    """Deterministic 'each person has a different item' puzzles: parse
+    equality/inequality constraints, brute-force the assignment, answer
+    'who has X?'. Model-independent. Returns a name or None."""
+    import itertools
+
+    people = _ordering_entities(task)
+    if not (2 <= len(people) <= 6):
+        return None
+    m = re.search(r"different\s+\w+\s*[:,]?\s*(?:are\s+|either\s+)?([a-z][^.?!]*?)[.?!]",
+                  task, re.I)
+    if not m:
+        return None
+    raw = m.group(1)
+    items = [re.sub(r"^(?:a|an|the)\s+", "", w.strip().lower())
+             for w in re.split(r"\s*,\s*(?:or\s+|and\s+)?|\s+(?:or|and)\s+", raw)
+             if w.strip()]
+    items = [w for w in dict.fromkeys(items) if w and " " not in w]
+    if len(items) != len(people):
+        return None
+    item_re = "|".join(re.escape(it) for it in items)
+    person_re = "|".join(re.escape(p) for p in people)
+
+    neq, eq = [], []
+    for mm in re.finditer(rf"({person_re})\s+(?:does\s+not|doesn'?t|do\s+not|did\s+not)\s+"
+                          rf"(?:{_ASSIGN_VERBS})\s+(?:the\s+|a\s+|an\s+)?({item_re})",
+                          task, re.I):
+        neq.append((mm.group(1), mm.group(2).lower()))
+    for mm in re.finditer(rf"({person_re})\s+(?:{_ASSIGN_VERBS})\s+"
+                          rf"(?:the\s+|a\s+|an\s+)?({item_re})", task, re.I):
+        pair = (mm.group(1), mm.group(2).lower())
+        if pair not in neq:
+            eq.append(pair)
+    if not (eq or neq):
+        return None
+
+    sols = []
+    for perm in itertools.permutations(items):
+        assign = {people[i]: perm[i] for i in range(len(people))}
+        if all(assign[p] == it for p, it in eq) and all(assign[p] != it for p, it in neq):
+            sols.append(assign)
+    if len(sols) != 1:
+        return None
+    assign = sols[0]
+    qm = re.search(rf"who\s+(?:{_ASSIGN_VERBS})\s+(?:the\s+|a\s+|an\s+)?({item_re})",
+                   task, re.I)
+    if qm:
+        target = qm.group(1).lower()
+        for p, it in assign.items():
+            if it == target:
+                return p
+    return None
+
+
 def h_logic(task, ctx):
     """Weighted majority: an executed enumeration program votes with weight 2,
     sampled chains-of-thought with weight 1."""
@@ -1009,6 +1088,19 @@ def h_logic(task, ctx):
             first_texts[k] = od
             prog_keys.add(k)
             tt = od  # treat as solved: suppress the unreliable enum path
+
+    # deterministic assignment solver ('each has a different item') — model-indep
+    if not tt and not ordering:
+        try:
+            asg = _assignment_solver(task)
+        except Exception:
+            asg = None
+        if asg:
+            k = norm_short(asg)
+            weights[k] = 4
+            first_texts[k] = asg
+            prog_keys.add(k)
+            tt = asg
 
     prog = None if (ordering or tt) else _logic_enum_ballot(ctx, task)
     if prog:
