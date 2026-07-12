@@ -174,8 +174,11 @@ def _facts_agree(ctx, q, a, b) -> bool:
 
 _PROG_SYS = ("You convert word problems into Python. Write a minimal Python 3 "
              "program that computes the requested result and prints ONLY the final "
-             "value with print(). Integer results must print as integers. Use exact "
-             "arithmetic (integers or the fractions module) where possible. "
+             "value with print(). Use exact arithmetic: prefer integers or the "
+             "fractions.Fraction module; NEVER truncate with int() unless the "
+             "problem asks for whole units. If the exact result is a whole number, "
+             "print it as an integer (e.g. print(round(x)) only when x is provably "
+             "whole). Do not round intermediate steps. "
              "Output only the code. No markdown, no comments, no explanations.")
 
 
@@ -388,8 +391,10 @@ def h_summarize(task, ctx):
 def h_ner(task, ctx):
     sysmsg = ("Extract ALL named entities from the text given in the task and label "
               "each with its type: Person, Organization, Location, Date, Time, Event, "
-              "Product, Money, Percent, or Other. Reply with one entity per line in "
-              "the format: Entity - Type. No other text.")
+              "Product, Money, Percent, or Other. Output ONE entity per line as "
+              "'Entity - Type' with exactly one type per line. Example:\n"
+              "Tim Cook - Person\nApple - Organization\nAustin - Location\n"
+              "5 June 2024 - Date\nNo other text.")
     a = ctx.chat(sysmsg, task, temperature=0.0, max_tokens=140)
     lines = _ner_lines(a)
     if not lines and ctx.have_time(15):
@@ -430,14 +435,34 @@ def _merge_adjacent_entities(lines, source):
     return out
 
 
+_NER_TYPES = ("person", "organization", "organisation", "location", "date",
+              "time", "event", "product", "money", "percent", "other", "org",
+              "gpe", "norp", "facility", "work", "law", "language")
+
+
 def _ner_lines(text):
     out = []
     for ln in (text or "").splitlines():
         ln = ln.strip().strip("-*• ").strip()
         if not ln:
             continue
-        if re.search(r".+\s[-—–:]\s*.+", ln):
-            out.append(re.sub(r"\s[-—–:]\s*", " - ", ln, count=1))
+        m = re.match(r"(.+?)\s*[-—–:]\s*(.+)", ln)
+        if not m:
+            continue
+        entity = m.group(1).strip()
+        rest = m.group(2).strip()
+        # a weak model sometimes mashes "Entity - Type - Type - Type"; keep the
+        # entity and only its FIRST valid type token
+        first_type = None
+        for tok in re.split(r"\s*[-—–,/;]\s*", rest):
+            t = tok.strip().strip(".")
+            if t.lower() in _NER_TYPES:
+                first_type = t
+                break
+        if first_type is None:
+            first_type = re.split(r"\s*[-—–,/;]\s*", rest)[0].strip().strip(".")
+        if entity and first_type:
+            out.append(f"{entity} - {first_type.capitalize()}")
     return out
 
 
@@ -859,6 +884,90 @@ def _logic_enum_ballot(ctx, task):
     return out
 
 
+_ORD_STOP = {"the", "a", "an", "who", "what", "which", "and", "but", "then",
+             "after", "before", "last", "first", "second", "third", "next",
+             "finished", "arrived", "came", "won", "race", "each", "all",
+             "three", "four", "five", "not", "does", "is", "in", "of", "to"}
+
+
+def _ordering_entities(task):
+    names = re.findall(r"\b([A-Z][a-z]+)\b", task)
+    out = []
+    for n in names:
+        if n.lower() in _ORD_STOP:
+            continue
+        if n not in out:
+            out.append(n)
+    return out
+
+
+def _ordering_solver(task):
+    """Deterministic ordering puzzles: parse before/after/first/last into
+    constraints over positions, brute-force the permutation, answer the
+    question. Model-independent. Returns a name or None."""
+    import itertools
+
+    ents = _ordering_entities(task)
+    if not (2 <= len(ents) <= 6):
+        return None
+    idx = {e: i for i, e in enumerate(ents)}
+    ent_re = "|".join(re.escape(e) for e in ents)
+    cons = []  # list of callables(order-list) -> bool ; order[0] = first place
+
+    def pos(order, e):
+        return order.index(idx[e])
+
+    # compound: "X (finished) before Y but after Z"  -> X<Y and X>Z
+    for m in re.finditer(rf"({ent_re})\s+(?:finished|came|arrived|ended)?\s*"
+                         rf"before\s+({ent_re})\s+but\s+after\s+({ent_re})",
+                         task, re.I):
+        x, y, z = m.group(1), m.group(2), m.group(3)
+        cons.append(lambda o, x=x, y=y: pos(o, x) < pos(o, y))
+        cons.append(lambda o, x=x, z=z: pos(o, x) > pos(o, z))
+    # compound: "X (finished) after Z but before Y"  -> X>Z and X<Y
+    for m in re.finditer(rf"({ent_re})\s+(?:finished|came|arrived|ended)?\s*"
+                         rf"after\s+({ent_re})\s+but\s+before\s+({ent_re})",
+                         task, re.I):
+        x, z, y = m.group(1), m.group(2), m.group(3)
+        cons.append(lambda o, x=x, y=y: pos(o, x) < pos(o, y))
+        cons.append(lambda o, x=x, z=z: pos(o, x) > pos(o, z))
+    for m in re.finditer(rf"({ent_re})\s+(?:finished|came|arrived|ended)?\s*"
+                         rf"(?:just\s+)?before\s+({ent_re})", task, re.I):
+        a, b = m.group(1), m.group(2)
+        cons.append(lambda o, a=a, b=b: pos(o, a) < pos(o, b))
+    for m in re.finditer(rf"({ent_re})\s+(?:finished|came|arrived|ended)?\s*"
+                         rf"(?:just\s+)?after\s+({ent_re})", task, re.I):
+        a, b = m.group(1), m.group(2)
+        cons.append(lambda o, a=a, b=b: pos(o, a) > pos(o, b))
+    for m in re.finditer(rf"({ent_re})\s+(?:finished|came|arrived|ended|was|is)?\s*"
+                         rf"(?:in\s+)?(?:the\s+)?last", task, re.I):
+        e = m.group(1)
+        cons.append(lambda o, e=e: pos(o, e) == len(o) - 1)
+    for m in re.finditer(rf"({ent_re})\s+(?:finished|came|arrived|ended|was|is)?\s*"
+                         rf"(?:in\s+)?(?:the\s+)?first|(?:won|wins)\b", task, re.I):
+        if m.group(1):
+            e = m.group(1)
+            cons.append(lambda o, e=e: pos(o, e) == 0)
+    if len(cons) < 2:
+        return None
+
+    valid = [o for o in itertools.permutations(range(len(ents)))
+             if all(c(list(o)) for c in cons)]
+    if len(valid) != 1:
+        return None
+    order = list(valid[0])
+    rank_of = {ents[order[p]]: p for p in range(len(ents))}
+    won = ents[order[0]]
+    last = ents[order[-1]]
+
+    q = task.lower()
+    if re.search(r"who\s+(won|finished first|came first|was first|is first)", q):
+        return won
+    if re.search(r"who\s+(finished last|came last|was last|is last)", q):
+        return last
+    return won
+
+
 def h_logic(task, ctx):
     """Weighted majority: an executed enumeration program votes with weight 2,
     sampled chains-of-thought with weight 1."""
@@ -887,6 +996,19 @@ def h_logic(task, ctx):
         weights[k] = 4
         first_texts[k] = tt
         prog_keys.add(k)
+
+    # deterministic ordering solver (before/after/first/last) — model-independent
+    if not tt and ordering:
+        try:
+            od = _ordering_solver(task)
+        except Exception:
+            od = None
+        if od:
+            k = norm_short(od)
+            weights[k] = 4
+            first_texts[k] = od
+            prog_keys.add(k)
+            tt = od  # treat as solved: suppress the unreliable enum path
 
     prog = None if (ordering or tt) else _logic_enum_ballot(ctx, task)
     if prog:
