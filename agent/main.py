@@ -125,36 +125,54 @@ def run():
 
     threading.Thread(target=_watchdog, daemon=True).start()
 
-    llm = LocalLLM()
-    llm.start()
+    # ESC_ALL: robust floor for a slow judge — Fireworks answers EVERY task in
+    # a parallel wave at t~0 (CPU-independent, immune to slow local inference/
+    # model-load). When it covers everything, the local model is never needed,
+    # so we skip starting it entirely.
+    esc_all = os.environ.get("ESC_ALL") == "1"
 
-    # hybrid: escalate-first. Fireworks answers the hard categories in a
-    # parallel wave at t~0 (immune to local CPU speed); the local pipeline
-    # covers easy categories and any failed calls.
+    llm = LocalLLM()
+    if not (MODE == "hybrid" and esc_all):
+        llm.start()
+
+    # hybrid: escalate-first. Fireworks answers the hard categories (or ALL,
+    # under ESC_ALL) in a parallel wave; the local pipeline covers the rest.
     fw_done = {}
     if MODE == "hybrid":
         try:
             from concurrent.futures import ThreadPoolExecutor
             from .fireworks import fw_answer
             HARD = {"factual", "math", "logic", "code_debug", "code_gen"}
-            hard_items = [it for it in items if it["cat"] in HARD][:ESC_MAX]
+            if esc_all:
+                esc_items = list(items)
+            else:
+                esc_items = [it for it in items if it["cat"] in HARD][:ESC_MAX]
 
             def _esc(it):
                 text, tok = fw_answer(it["prompt"], it["cat"])
                 return it["id"], text
 
-            if hard_items:
-                with ThreadPoolExecutor(max_workers=4) as ex:
-                    for tid, text in ex.map(_esc, hard_items):
+            if esc_items:
+                with ThreadPoolExecutor(max_workers=8) as ex:
+                    for tid, text in ex.map(_esc, esc_items):
                         if text:
                             fw_done[tid] = text
-                log(f"escalate-first wave: {len(fw_done)}/{len(hard_items)} answered by Fireworks")
+                log(f"escalate wave: {len(fw_done)}/{len(esc_items)} answered by Fireworks")
                 with _lock:
                     _results.update(fw_done)
+                confs_seed = {it["id"]: 0.85 for it in items if it["id"] in fw_done}
                 flush()
         except Exception as e:
-            log(f"escalate-first error (falling back to local): {e}")
+            log(f"escalate error (falling back to local): {e}")
 
+    # If ESC_ALL covered every task, we're done — no local model, no risk.
+    if MODE == "hybrid" and esc_all and len(fw_done) == len(items):
+        log(f"ESC_ALL complete: {len(fw_done)}/{len(items)} via Fireworks, skipping local")
+        flush()
+        return 0
+
+    if not llm.proc:
+        llm.start()
     if not llm.wait_ready(timeout=90):
         log("FATAL: local model failed to start")
         flush()

@@ -35,12 +35,14 @@ COPY agent /app/agent
 ARG MODE=zero
 ARG ESC_MAX=6
 ARG ESC_CONF=0.55
+ARG ESC_ALL=0
 ENV LLAMA_BIN=/opt/llama/llama-server \
     MODEL_PATH=/models/model.gguf \
     LLAMA_THREADS=2 \
     MODE=${MODE} \
     ESC_MAX=${ESC_MAX} \
     ESC_CONF=${ESC_CONF} \
+    ESC_ALL=${ESC_ALL} \
     SOFT_DEADLINE=515 \
     HARD_DEADLINE=575 \
     PYTHONUNBUFFERED=1

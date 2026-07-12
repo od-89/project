@@ -37,6 +37,20 @@ jobs:
             MODE=zero
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Build and push (ESC_ALL Fireworks floor -> f1)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:f1
+          build-args: |
+            MODE=hybrid
+            ESC_ALL=1
+            MODEL_URL=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Build and push (1.5B zero -> z15b)
         uses: docker/build-push-action@v6
         with:
