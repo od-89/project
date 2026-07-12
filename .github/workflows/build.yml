@@ -37,6 +37,19 @@ jobs:
             MODE=zero
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Build and push (1.5B zero -> z15b)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:z15b
+          build-args: |
+            MODE=zero
+            MODEL_URL=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Build and push (hybrid fallback)
         uses: docker/build-push-action@v6
         with:

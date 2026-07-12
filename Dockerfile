@@ -19,10 +19,10 @@ RUN curl -fL -o /tmp/llama.tgz \
 
 # ---- stage 2: model weights --------------------------------------------------
 FROM debian:bookworm-slim AS model
+ARG MODEL_URL=https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /models && curl -fL -o /models/model.gguf \
-      "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+RUN mkdir -p /models && curl -fL -o /models/model.gguf "${MODEL_URL}"
 
 # ---- stage 3: runtime --------------------------------------------------------
 FROM python:3.11-slim
