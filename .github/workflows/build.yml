@@ -31,7 +31,7 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:z1
+            ${{ env.IMAGE }}:z2
             ${{ env.IMAGE }}:${{ github.sha }}
           build-args: |
             MODE=zero

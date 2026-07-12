@@ -876,9 +876,12 @@ def h_logic(task, ctx):
         r"finish|arriv|before|after|\bfirst\b|\blast\b|order|rank|race|queue",
         task, re.I))
 
-    # decomposed truth-table beats everything for 'exactly N true' puzzles:
-    # code enumerates, the model only answers trivial YES/NO micro-questions
-    tt = _truth_table_solver(ctx, task) if ctx.have_time(16) else None
+    # decomposed truth-table beats everything for 'exactly N true' puzzles.
+    # For box/membership puzzles it is fully deterministic (regex options +
+    # code-evaluated statements = ZERO llm calls), so run it even in the fast
+    # Pass 1; it early-returns None for non-matching puzzles, and its internal
+    # per-task deadline guard bounds the rare llm-backed case.
+    tt = _truth_table_solver(ctx, task)
     if tt:
         k = norm_short(tt)
         weights[k] = 4
