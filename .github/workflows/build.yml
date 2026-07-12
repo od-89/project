@@ -83,6 +83,24 @@ jobs:
             MODEL_URL=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Build and push (0.5B zero, clean single-manifest -> z05..z05d)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ env.IMAGE }}:z05
+            ${{ env.IMAGE }}:z05b
+            ${{ env.IMAGE }}:z05c
+            ${{ env.IMAGE }}:z05d
+          build-args: |
+            MODE=zero
+            MODEL_URL=https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Build and push (hybrid fallback)
         uses: docker/build-push-action@v6
         with:
