@@ -41,6 +41,8 @@ ENV LLAMA_BIN=/opt/llama/llama-server \
     MODE=${MODE} \
     ESC_MAX=${ESC_MAX} \
     ESC_CONF=${ESC_CONF} \
+    SOFT_DEADLINE=515 \
+    HARD_DEADLINE=575 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app

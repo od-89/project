@@ -218,8 +218,8 @@ def h_math(task, ctx):
             break
         if i >= 3 and not ctx.have_time(20):
             break
-        if getattr(ctx, "fast", False) and len(ballots) >= 2:
-            break  # two ballots suffice for pass 1; pass 2 completes the vote
+        if getattr(ctx, "fast", False) and len(ballots) >= 1:
+            break  # pass 1 banks one program's result; pass 2 votes for real
         v = _math_ballot(ctx, task, kind, temp, seed)
         if v is not None:
             ballots.append((kind, v))
@@ -902,8 +902,8 @@ def h_logic(task, ctx):
         clear_lead = top >= 3 and (len(others) < 2 or others[1] <= top - 2)
         if clear_lead and samples >= 1:
             break
-        if getattr(ctx, "fast", False) and samples >= 2:
-            break  # fast pass banks a 2-sample answer; pass 2 finishes the vote
+        if getattr(ctx, "fast", False) and (weights or samples >= 1):
+            break  # pass 1: bank enum's answer, or a single CoT if enum missed
         if i >= 3 and not (ctx.have_time(25) and _needs_tiebreak(weights)):
             break
         r = ctx.chat(sm, task, temperature=temp, max_tokens=256, seed=seed)

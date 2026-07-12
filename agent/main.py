@@ -84,7 +84,10 @@ class Ctx:
         return self.llm.chat(system, user, **kw)
 
     def have_time(self, seconds_needed: float) -> bool:
-        if self.fast and seconds_needed > 18:
+        # fast (Pass 1) banks exactly one answer per task: every optional,
+        # have_time-gated verification call is suppressed. Deep verification
+        # runs in Pass 2 (fast=False) on the lowest-confidence tasks only.
+        if self.fast and seconds_needed > 0:
             return False
         if elapsed() + seconds_needed > SOFT_DEADLINE:
             return False

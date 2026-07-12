@@ -23,7 +23,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push (aggressive hybrid -> latest)
+      - name: Build and push (zero mode -> latest + z1)
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -31,24 +31,24 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:v6f
+            ${{ env.IMAGE }}:z1
             ${{ env.IMAGE }}:${{ github.sha }}
           build-args: |
-            MODE=hybrid
-            ESC_MAX=12
-            ESC_CONF=0.8
+            MODE=zero
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Build and push (zero mode)
+      - name: Build and push (hybrid fallback)
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.IMAGE }}:zero
+            ${{ env.IMAGE }}:hybrid
           build-args: |
-            MODE=zero
+            MODE=hybrid
+            ESC_MAX=12
+            ESC_CONF=0.8
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
